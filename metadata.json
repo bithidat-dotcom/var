@@ -1,0 +1,6 @@
+{
+  "name": "Gemini Voice Assistant",
+  "description": "Voice-activated continuous control console for the autonomous Gemini Assistant intelligence core.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
