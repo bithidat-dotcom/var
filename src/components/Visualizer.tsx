@@ -300,7 +300,15 @@ export const Visualizer: React.FC<VisualizerProps> = ({
   const themeColors = getThemeRingColors();
 
   return (
-    <div className={`flex flex-col items-center justify-center relative p-6 h-full min-h-[420px] transition-all bg-black/30 rounded-xl`} id="gemini-brain-visualizer">
+    <div className={`flex flex-col items-center justify-center relative p-6 h-full min-h-[440px] transition-all rounded-xl border ${
+      isListening 
+        ? "bg-gradient-to-b from-[#061214] to-[#010609] border-[#10b981]/30 shadow-[0_0_50px_rgba(16,185,129,0.06)]"
+        : isThinking
+        ? "bg-gradient-to-b from-[#0c0c16] to-[#030307] border-white/15 shadow-[0_0_40px_rgba(255,255,255,0.04)]"
+        : isSpeaking
+        ? "bg-gradient-to-b from-[#070b18] to-[#020308] border-blue-500/20 shadow-[0_0_45px_rgba(59,130,246,0.05)]"
+        : "bg-[#04060c]/90 border-white/5 shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
+    }`} id="gemini-brain-visualizer">
       
       {/* HUD Speed Optimizer Overlay */}
       <div className="absolute top-4 left-4 right-4 flex justify-between items-center z-20">
@@ -377,25 +385,25 @@ export const Visualizer: React.FC<VisualizerProps> = ({
         <div className="flex gap-2 w-full pt-2 border-t border-white/10">
           <button
             onClick={onToggleListen}
-            className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[9px] font-mono tracking-widest uppercase bg-transparent border rounded transition-all cursor-pointer ${
-              isListening && !isListening
-                ? "border-white bg-white text-black font-extrabold shadow-[0_0_10px_rgba(255,255,255,0.3)]" 
-                : "border-white/15 hover:border-white text-white/60 hover:text-white hover:bg-white/5"
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono tracking-widest uppercase rounded transition-all cursor-pointer border ${
+              isListening
+                ? "border-emerald-500 bg-emerald-500/15 text-emerald-300 font-extrabold shadow-[0_0_12px_rgba(16,185,129,0.3)] scale-[0.98]" 
+                : "border-white/15 hover:border-white/40 text-white/70 hover:text-white bg-white/5 hover:bg-white/10"
             }`}
+            title="Toggle speech recognition trigger"
+            id="voice-mic-main-btn"
           >
-            <Mic className="w-3 h-3" />
+            <Mic className={`w-3.5 h-3.5 ${isListening ? "text-emerald-400 animate-pulse" : "text-white/60"}`} />
             Voice Mic
           </button>
 
           {/* ALL TIME LISTEN / CONTINUOUS CALL BUTTON (PULSING ACTIVE DIAL) */}
           <button
-            onClick={() => {
-              onToggleListen();
-            }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[9px] font-mono tracking-widest uppercase rounded border transition-all cursor-pointer ${
+            onClick={onToggleListen}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono tracking-widest uppercase rounded border transition-all cursor-pointer ${
               isListening
-                ? "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 animate-pulse font-extrabold shadow-[0_0_15px_rgba(16,185,129,0.5)]"
-                : "bg-black/60 text-emerald-400 border-emerald-500/20 hover:border-emerald-500 hover:text-white"
+                ? "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 animate-pulse font-extrabold shadow-[0_0_15px_rgba(16,185,129,0.5)] scale-[0.98]"
+                : "bg-black/60 text-emerald-400 border-emerald-500/20 hover:border-emerald-500/50 hover:text-white"
             }`}
             title="Always-listening stream: stay on continuous feedback channel"
             id="always-listening-call-btn"
@@ -422,7 +430,7 @@ export const Visualizer: React.FC<VisualizerProps> = ({
         }`}
         style={{
           boxShadow: isListening 
-            ? "inset 0 0 30px rgba(255,255,255,0.12), 0 0 50px rgba(255,255,255,0.2)" 
+            ? "inset 0 0 30px rgba(255,255,255,0.12), 0 0 50px rgba(16,185,129,0.3)" 
             : isThinking 
             ? "inset 0 0 20px rgba(255,255,255,0.1), 0 0 30px rgba(255,255,255,0.08)"
             : ""
@@ -442,10 +450,14 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           <div className="absolute w-28 h-28 border border-dashed border-white/20 rounded-full" />
         </div>
 
-        {/* Expandable kinetic rings responding to fast-mode parameters */}
+        {/* Expandable kinetic rings responding to fast-mode parameters (Selector 1) */}
         <div 
-          className={`absolute rounded-full border transition-all duration-300 ${themeColors.innerRippleColor} ${
-            isListening ? "w-56 h-56 opacity-90 scale-110" : "w-44 h-44 opacity-40 scale-100"
+          className={`absolute rounded-full border border-dashed transition-all duration-500 ${themeColors.innerRippleColor} ${
+            isListening 
+              ? "w-56 h-56 opacity-90 scale-110 animate-[spin_8s_linear_infinite] border-white/60 shadow-[0_0_20px_rgba(255,255,255,0.15)]" 
+              : isThinking
+              ? "w-48 h-48 opacity-70 animate-[spin_4s_linear_infinite]"
+              : "w-44 h-44 opacity-40 scale-100 animate-[spin_30s_linear_infinite]"
           }`}
           style={{
             borderWidth: hyperSpeedEnabled ? "2px" : "1px"
@@ -461,46 +473,46 @@ export const Visualizer: React.FC<VisualizerProps> = ({
           </>
         )}
 
-        {/* Central interactive neural voice hub */}
+        {/* Central interactive neural voice hub (Selector 2) */}
         <button
           onClick={onToggleListen}
-          className={`w-32 h-32 rounded-full border-2 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all duration-300 relative z-10 ${
+          className={`w-36 h-36 rounded-full border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all duration-500 relative z-10 ${
             isListening
-              ? "bg-white text-black border-white scale-95 shadow-inner"
+              ? "bg-gradient-to-b from-[#10b981] to-[#047857] text-white border-emerald-300 scale-95 shadow-[0_0_40px_rgba(16,185,129,0.55),inset_0_2px_8px_rgba(255,255,255,0.3)]"
               : isThinking
-              ? "bg-black text-white border-white scale-100 animate-pulse"
+              ? "bg-gradient-to-tr from-[#151a29] to-[#070b13] text-white border-white scale-100 animate-pulse shadow-[0_0_30px_rgba(255,255,255,0.15)]"
               : isSpeaking
-              ? "bg-[#111111] text-white border-white scale-105"
-              : "bg-black/90 hover:bg-white/5 text-white border-white/30 hover:border-white"
+              ? "bg-gradient-to-b from-[#2563eb] to-[#1e3a8a] text-white border-blue-400 scale-105 shadow-[0_0_35px_rgba(59,130,246,0.5),inset_0_2px_8px_rgba(255,255,255,0.2)]"
+              : "bg-gradient-to-b from-[#090e1a] to-[#02050c] hover:from-[#11192e] hover:to-[#090e1a] text-white border-white/20 hover:border-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(255,255,255,0.05)] hover:shadow-[0_0_25px_rgba(255,255,255,0.08)]"
           }`}
           title="Toggle Voice Controller (Microphone Link)"
           id="interactive-voice-trigger"
         >
           {isListening ? (
             <div className="flex flex-col items-center">
-              <Zap className="w-9 h-9 text-black animate-bounce" />
-              <span className="text-[9px] uppercase tracking-widest font-black text-black mt-1">
+              <Zap className="w-10 h-10 text-white animate-bounce fill-white" />
+              <span className="text-[9.5px] uppercase tracking-widest font-black text-white mt-1">
                 LISTENING
               </span>
             </div>
           ) : isThinking ? (
             <div className="flex flex-col items-center">
               <RefreshCw className="w-8 h-8 text-white animate-spin" />
-              <span className="text-[9px] uppercase tracking-widest font-black text-white mt-1">
+              <span className="text-[9.5px] uppercase tracking-widest font-black text-white mt-1">
                 THINKING
               </span>
             </div>
           ) : isSpeaking ? (
             <div className="flex flex-col items-center">
-              <Volume2 className="w-9 h-9 text-white animate-pulse" />
-              <span className="text-[9px] uppercase tracking-widest font-bold text-white mt-1">
+              <Volume2 className="w-10 h-10 text-white animate-pulse" />
+              <span className="text-[9.5px] uppercase tracking-widest font-bold text-white mt-1">
                 SPEAKING
               </span>
             </div>
           ) : (
             <div className="flex flex-col items-center p-2 text-center">
               <Mic className="w-8 h-8 text-white/80 group-hover:scale-110 duration-200" />
-              <span className="text-[9px] uppercase tracking-widest text-white/50 font-mono mt-1">
+              <span className="text-[9.5px] uppercase tracking-widest text-white/50 font-mono mt-1">
                 TAP MIC
               </span>
             </div>

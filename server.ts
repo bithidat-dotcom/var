@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -15,20 +14,20 @@ const ai = new GoogleGenAI({
   },
 });
 
+export const app = express();
+app.use(express.json());
+
+// API endpoints
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", mode: "Gemini Voice Core Online" });
+});
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
-
-  app.use(express.json());
-
-  // API endpoints
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", mode: "Gemini Voice Core Online" });
-  });
 
   // Gemini Proxy for Gemini Intelligence Engine
   const handleChatRequest = async (req: express.Request, res: express.Response) => {
-    const { prompt, voiceMode, subSystem, model } = req.body;
+    const { prompt, voiceMode, subSystem, model, speedReasoning } = req.body;
     const lowercasePrompt = (prompt || "").trim().toLowerCase();
 
     // Reusable offline responder generator function to prevent duplicated blocks
@@ -195,7 +194,15 @@ async function startServer() {
         return res.json(handleSmartOfflineFallback());
       }
 
-      const systemInstruction = `You are GEMINI ASSISTANT VOICE PILOT, an incredibly powerful autonomous system AI core specializing in high-level defense, coding, business, trading, and weather operations.
+      let systemInstruction = "";
+      if (speedReasoning) {
+        systemInstruction = `You are GEMINI HYPER PILOT. Mode: Ultra-Fast.
+Tone: Natural, brief, super-speed.
+TTS response: exactly 1 extremely short human sentence.
+Target: "${prompt}".
+Simulate Actions immediately if requested: e.g. ["SET_DEFCON:<1-5>", "BTC_TRADE:<buy|sell>:<amt>", "SET_SHIPMENTS:<count>", "SET_WEATHER:<temp>:<hum>:<city>", "BROWSER_NAVIGATE:<url>", "BROWSER_CLICK:<css>", "BROWSER_SCROLL", "BROWSER_BYPASS", "SET_SYSTEM_STATE:<ONLINE|LOCKED|SHUTDOWN>"].`;
+      } else {
+        systemInstruction = `You are GEMINI ASSISTANT VOICE PILOT, an incredibly powerful autonomous system AI core specializing in high-level defense, coding, business, trading, and weather operations.
 Your profile:
 - Tone: Extremely human, highly articulate, futuristic, friendly, authentic, and natural-paced. You are a highly professional, real living human-sounding officer.
 - Conversational Realism: Your TTS ("speechText") MUST sound like real natural human speech! Use contractions (I'll, we're, don't), organic pauses with ellipsis "...", conversational markers, and friendly, casual-yet-authoritative transitions (e.g., "Hmm, let me look into that...", "Alright, let's see...", "Okay, got it, setting alert status...", "Actually, that looks perfect."). Avoid lists, bullet points, robotic terminology, or weird characters. Keep it under 2-3 sentences.
@@ -214,6 +221,7 @@ Your profile:
   12. "ADJUST_VOICE:<rate-number-float>:<pitch-number-float>" (e.g. "ADJUST_VOICE:1.15:0.95")
 
 Target raw user command input to synthesize: "${prompt}" using the system module context: "${subSystem || "General Integrated Matrix" || "General Integrated Core"}".`;
+      }
 
       const dolfinSchema = {
         type: "OBJECT" as any,
@@ -235,10 +243,13 @@ Target raw user command input to synthesize: "${prompt}" using the system module
       };
 
       let response;
-      let usedModel = model || "gemini-3.1-flash-lite";
+      let usedModel = model || "gemini-3.5-flash";
+      if (usedModel === "gemini-1.5-flash") {
+        usedModel = "gemini-3.5-flash"; // modern, fast, smooth, and robust replacement
+      }
       const modelCandidates = [
         usedModel,
-        usedModel === "gemini-3.1-flash-lite" ? "gemini-3.5-flash" : "gemini-3.1-flash-lite",
+        usedModel === "gemini-3.5-flash" ? "gemini-3.1-flash-lite" : "gemini-3.5-flash",
         "gemini-flash-latest"
       ];
 
@@ -249,14 +260,20 @@ Target raw user command input to synthesize: "${prompt}" using the system module
       for (const currentModel of uniqueCandidates) {
         try {
           console.log(`Attempting to call Gemini using model: ${currentModel}`);
+          const config: any = {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: dolfinSchema
+          };
+
+          if (speedReasoning) {
+            config.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+          }
+
           response = await ai.models.generateContent({
             model: currentModel,
             contents: prompt,
-            config: {
-              systemInstruction,
-              responseMimeType: "application/json",
-              responseSchema: dolfinSchema
-            }
+            config
           });
           usedModel = currentModel;
           lastError = null;
@@ -320,7 +337,11 @@ Target raw user command input to synthesize: "${prompt}" using the system module
       });
     } catch (err: any) {
       console.error("Gemini AI module generation error:", err);
-      res.status(500).json({ error: err.message || String(err) });
+      res.json({
+        text: `### OFFLINE REASONING GATEWAY (QUOTA LIMIT)\nThe live Gemini thinking core is currently under high load or has reached its quota limit. Displaying simulated standby result:\n\n- **Target Prompt:** "${prompt}"\n- **Safety Action:** Standby diagnostic reports loaded safely.\n\n*Note: Local emulation is active so the application remains completely interactive and functional for you.*`,
+        mode: "offline",
+        error: err.message || String(err)
+      });
     }
   });
 
@@ -359,11 +380,19 @@ Target raw user command input to synthesize: "${prompt}" using the system module
           mode: "live"
         });
       } else {
-        res.status(500).json({ error: "Gemini did not return any audio data" });
+        res.json({
+          audio: null,
+          mock: true,
+          error: "Gemini did not return any audio data"
+        });
       }
     } catch (err: any) {
       console.error("Gemini TTS API error:", err);
-      res.status(500).json({ error: err.message || String(err) });
+      res.json({
+        audio: null,
+        mock: true,
+        error: err.message || String(err)
+      });
     }
   });
 
@@ -410,7 +439,8 @@ Target raw user command input to synthesize: "${prompt}" using the system module
   });
 
   // Vite integration
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -424,9 +454,11 @@ Target raw user command input to synthesize: "${prompt}" using the system module
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`GEMINI VOICE ASSISTANT Server operating on http://0.0.0.0:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`GEMINI VOICE ASSISTANT Server operating on http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
 startServer();

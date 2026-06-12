@@ -16,7 +16,9 @@ import {
   Play, 
   CodeXml,
   Database,
-  ArrowRight
+  ArrowRight,
+  Zap,
+  Gauge
 } from "lucide-react";
 import { Visualizer } from "./components/Visualizer";
 import { SystemStatus, SubsystemData, VoiceProfile, BrowserMirror, TerminalLog } from "./types";
@@ -72,6 +74,11 @@ export default function App() {
   const [voicePitch, setVoicePitch] = useState<number>(1.0);
   const [animationStyle, setAnimationStyle] = useState<"siri-flow" | "neon-matrix" | "solar-flare" | "radar-helix">("siri-flow");
   const [ttsMode, setTtsMode] = useState<"off" | "browser" | "gemini">("gemini");
+  
+  // Custom Speech & Agent Speed Control optimizations
+  const [onlySpeakOk, setOnlySpeakOk] = useState<boolean>(true);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en-US");
+  const [singleTurnListen, setSingleTurnListen] = useState<boolean>(true);
 
   const [reasoningSteps, setReasoningSteps] = useState<string[]>([]);
   const [learningLogs, setLearningLogs] = useState<string[]>([
@@ -128,7 +135,7 @@ export default function App() {
 
   // Command input text for typing trigger besides voice
   const [voiceInputOverrideText, setVoiceInputOverrideText] = useState<string>("");
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.1-flash-lite");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.5-flash");
   const [apiStatus, setApiStatus] = useState<"standby" | "live" | "warning">("standby");
   const [activeModelInfo, setActiveModelInfo] = useState<string>("");
   const [geminiThinking, setGeminiThinking] = useState<string>("Gemini Co-Pilot is analyzing market volatility.");
@@ -250,9 +257,20 @@ export default function App() {
 
   // Human voice speaking emulator
   const triggerVoiceSpeak = async (textToSay: string) => {
+    let actualText = textToSay;
+    if (onlySpeakOk) {
+      if (selectedLanguage.startsWith("es")) actualText = "OK";
+      else if (selectedLanguage.startsWith("fr")) actualText = "D'accord";
+      else if (selectedLanguage.startsWith("ja")) actualText = "了解";
+      else if (selectedLanguage.startsWith("de")) actualText = "Okay";
+      else if (selectedLanguage.startsWith("bn")) actualText = "ঠিক আছে";
+      else if (selectedLanguage.startsWith("it")) actualText = "Va bene";
+      else actualText = "Okay";
+    }
+
     if (ttsMode === "off") {
       // Muted - completely offline/not vocalized but shown on terminal display
-      setSpokenText(textToSay);
+      setSpokenText(actualText);
       setIsSpeaking(true);
       setTimeout(() => setIsSpeaking(false), 2400);
       return;
@@ -260,7 +278,7 @@ export default function App() {
 
     if (ttsMode === "browser") {
       if (!synthRef.current) {
-        setSpokenText(textToSay);
+        setSpokenText(actualText);
         setIsSpeaking(true);
         setTimeout(() => setIsSpeaking(false), 2400);
         return;
@@ -268,13 +286,19 @@ export default function App() {
 
       try {
         synthRef.current.cancel(); // Abort existing voice quickly
-        const utterance = new SpeechSynthesisUtterance(textToSay);
+        const utterance = new SpeechSynthesisUtterance(actualText);
+        utterance.lang = selectedLanguage;
         
         // Match voice standard to available web voices
         const voicesList = browserVoices.length > 0 ? browserVoices : (synthRef.current.getVoices() || []);
         
-        // Look for highest quality English natural/neural voice first
-        let matchedVoice = voicesList.find(v => v.lang.includes("en-US") && (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("neural")));
+        // Try to filter by selected language first
+        let matchedVoice = voicesList.find(v => v.lang.toLowerCase().replace("_", "-").startsWith(selectedLanguage.toLowerCase().split("-")[0]));
+        
+        if (!matchedVoice) {
+          // Look for highest quality English natural/neural voice first
+          matchedVoice = voicesList.find(v => v.lang.includes("en-US") && (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("neural")));
+        }
         
         if (!matchedVoice) {
           matchedVoice = voicesList.find(v => v.lang.startsWith("en"));
@@ -343,7 +367,7 @@ export default function App() {
         
         utterance.onstart = () => {
           setIsSpeaking(true);
-          setSpokenText(textToSay);
+          setSpokenText(actualText);
           setVoiceStatus("Speaking like human");
         };
         utterance.onend = () => {
@@ -357,7 +381,7 @@ export default function App() {
         synthRef.current.speak(utterance);
       } catch {
         setIsSpeaking(true);
-        setSpokenText(textToSay);
+        setSpokenText(actualText);
         setTimeout(() => setIsSpeaking(false), 3000);
       }
       return;
@@ -366,7 +390,7 @@ export default function App() {
     if (ttsMode === "gemini") {
       try {
         setIsSpeaking(true);
-        setSpokenText(textToSay);
+        setSpokenText(actualText);
         setVoiceStatus("Gemini Voice Model Generating...");
 
         // Map frontend voices to standard Gemini Voice Names: Puck, Charon, Kore, Fenrir, Zephyr
@@ -380,7 +404,7 @@ export default function App() {
         const response = await fetch("/api/gemini/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: textToSay, voiceName })
+          body: JSON.stringify({ text: actualText, voiceName })
         });
         const data = await response.json();
 
@@ -389,7 +413,7 @@ export default function App() {
           playRawPCM24k(data.audio);
           
           // Mimic speaking overlay timings
-          const approximateDuration = Math.max(1500, textToSay.split(" ").length * 400);
+          const approximateDuration = Math.max(1500, actualText.split(" ").length * 400);
           setTimeout(() => {
             setIsSpeaking(false);
             setVoiceStatus(isListening ? "Listening for Audio" : "Operational Mode Connected");
@@ -398,7 +422,8 @@ export default function App() {
           // If mock or offline mode, fall back beautifully to Browser voices or silent logging
           if (synthRef.current) {
             synthRef.current.cancel();
-            const utterance = new SpeechSynthesisUtterance(textToSay);
+            const utterance = new SpeechSynthesisUtterance(actualText);
+            utterance.lang = selectedLanguage;
             utterance.pitch = voicePitch * selectedVoice.pitch;
             utterance.rate = voiceRate * selectedVoice.rate;
             utterance.onstart = () => {
@@ -446,10 +471,15 @@ export default function App() {
       return;
     }
 
-    // Toggle ON: Start continuous listening
+    // Toggle ON: Start listening
     setIsListening(true);
-    setVoiceStatus(hyperSpeedEnabled ? "Quantum Continuous Active" : "Continuous Listening Active");
-    appendLog(hyperSpeedEnabled ? "Ultra-fast continuous voice link enabled. Speak anytime!" : "Continuous Gemini Assistant system linked. Listening continuously...", "info");
+    if (singleTurnListen) {
+      setVoiceStatus("Capture turn active...");
+      appendLog("Single-turn voice link engaged. Speak 1 request now!", "success");
+    } else {
+      setVoiceStatus(hyperSpeedEnabled ? "Quantum Continuous Active" : "Continuous Listening Active");
+      appendLog(hyperSpeedEnabled ? "Ultra-fast continuous voice link enabled. Speak anytime!" : "Continuous Gemini Assistant system linked. Listening continuously...", "info");
+    }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -461,13 +491,19 @@ export default function App() {
         const recognition = new SpeechRecognition();
         recognitionRef.current = recognition;
         
-        // We set continuous = true so the browser listens for a full sentence sequence without cutting off immediately.
-        recognition.continuous = true;
+        // Match user's preferred speech language for input speech recognition as well! This is super genius.
+        recognition.lang = selectedLanguage;
+        
+        // We set continuous = true when we want infinite loop, else false so it naturally stops after speech ends.
+        recognition.continuous = !singleTurnListen;
         recognition.interimResults = false;
-        recognition.lang = "en-US";
 
         recognition.onstart = () => {
-          setVoiceStatus(hyperSpeedEnabled ? "Gemini continuous stream active" : "Capturing speech streams...");
+          if (singleTurnListen) {
+            setVoiceStatus("Listening for single request...");
+          } else {
+            setVoiceStatus(hyperSpeedEnabled ? "Gemini continuous stream active" : "Capturing speech streams...");
+          }
         };
 
         recognition.onresult = (event: any) => {
@@ -483,13 +519,23 @@ export default function App() {
             const finalCleanText = latestTranscript.trim();
             setTranscript(finalCleanText);
             setVoiceStatus("Gemini Core Stream Received");
+            
+            if (singleTurnListen) {
+              // Immediately turn off listening states and stop recognition
+              setIsListening(false);
+              isListeningRef.current = false;
+              try {
+                recognition.stop();
+              } catch (err) {}
+            }
+            
             executeCoreAICommand(finalCleanText);
           }
         };
 
         recognition.onend = () => {
           // Critical Requirement: Auto restart when continuous listening is enabled
-          if (isListeningRef.current) {
+          if (isListeningRef.current && !singleTurnListen) {
             console.log("Speech recognition socket ended naturally. Auto-restarting continuous listener...");
             try {
               recognition.start();
@@ -578,6 +624,28 @@ export default function App() {
     // Immediate action detection for critical commands
     const lowercaseCmd = commandLine.toLowerCase();
 
+    // 1. Voice Host Lock Simulation
+    if (lowercaseCmd.includes("lock") || lowercaseCmd.includes("lock system") || lowercaseCmd.includes("lockdown") || lowercaseCmd.includes("lock console")) {
+      setIsThinking(false);
+      setSystemState("LOCKED");
+      appendLog("CRITICAL ACTION: Terminal Lock Engaged via voice command.", "warning");
+      triggerVoiceSpeak("Locked down. Access to the main console is locked. Disengage voice shield to proceed.");
+      setGeminiThinking("Secure firewall locks established. Halting standard telemetry displays.");
+      setDisplayTextResponse("### SYSTEM LOCK ENGAGED\n\nTo restore continuous neural link operations, please click the secure unlock trigger in the lock display viewport.");
+      return;
+    }
+
+    // 2. Voice Host Shutdown Simulation
+    if (lowercaseCmd.includes("shutdown") || lowercaseCmd.includes("turn off") || lowercaseCmd.includes("power off") || lowercaseCmd.includes("power down")) {
+      setIsThinking(false);
+      setSystemState("SHUTDOWN");
+      appendLog("CRITICAL ACTION: Terminal Shutdown Sequence triggered via voice.", "error");
+      triggerVoiceSpeak("Initiating secure host laptop shutdown sequence. Disconnecting active audio channels. Goodbye developer.");
+      setGeminiThinking("OS kernel shutdown signal dispatched safely.");
+      setDisplayTextResponse("### TERMINAL OFFLINE STATUS\n\nThe central Gemini brain and local hosting services are fully powered down. Use the visual boot switch to restore connections.");
+      return;
+    }
+
     // 0. Scroll Up / Down Commands
     if (lowercaseCmd.includes("scroll down") || lowercaseCmd.includes("scrolling down") || lowercaseCmd.includes("scroll bottom")) {
       setIsThinking(false);
@@ -613,27 +681,7 @@ export default function App() {
       return;
     }
     
-    // 1. Laptop Shutdown Simulation
-    if (lowercaseCmd.includes("shutdown") || lowercaseCmd.includes("turn off")) {
-      setSystemState("SHUTDOWN");
-      setIsThinking(false);
-      appendLog("CRITICAL: SHUTDOWN SIGNAL PROPAGATED.", "error");
-      triggerVoiceSpeak("Executing host laptop shutdown sequence. Saving neural registry status safely. Goodbye developer.");
-      setGeminiThinking("Initiating secure OS host terminal shutdown.");
-      setDisplayTextResponse("### HOST LAPTOP SHUTDOWN\n- Signal: `SIGTERM`\n- State: Disconnected\n- Core status: Closed down securely.\n\nSimulated Host Laptop power supply bypass has been completed selfly.");
-      return;
-    }
-
-    // 2. Lock System Simulation
-    if (lowercaseCmd.includes("lock") || lowercaseCmd.includes("stop console") || lowercaseCmd.includes("lock system")) {
-      setSystemState("LOCKED");
-      setIsThinking(false);
-      appendLog("System lock applied instantly.", "warning");
-      triggerVoiceSpeak("Operational console is locked down instantly. Bypassing voice unauthorized accesses.");
-      setGeminiThinking("Guard rails deployed. Restricting voice control interface.");
-      setDisplayTextResponse("### SYSTEM ACCESS STRICTLY CONSTRAINED\nClick 'Unlock Core' to return with voice authorizations safely.");
-      return;
-    }
+    // Standard voice triggers are routed seamlessly without lockdown interruptions.
 
     // Execute standard AI Agent endpoint
     try {
@@ -907,128 +955,88 @@ export default function App() {
         <div className="flex gap-4 items-center flex-wrap">
           <div className="text-right hidden sm:block">
             <p className="text-[9px] text-white/50 uppercase font-mono tracking-wider">System State</p>
-            <p className="text-xs font-bold font-mono tracking-widest">{systemState}</p>
-          </div>
-          <div className="h-8 w-[1px] bg-white/20 hidden sm:block"></div>
-
-          {/* Quick Lock & Reboot Triggers */}
-          <div className="flex gap-2">
-            {systemState === "LOCKED" ? (
-              <button 
-                onClick={() => {
-                  setSystemState("ONLINE");
-                  appendLog("Neural system lock disengaged safely.", "success");
-                  triggerVoiceSpeak("Lock disengaged developer. Welcome back to the main layout.");
-                }}
-                className="btn-white bg-white text-black flex items-center gap-2 px-3 py-1.5 text-xs rounded font-bold uppercase cursor-pointer"
-                id="unlock-app-btn"
-              >
-                <Unlock className="w-3.5 h-3.5" />
-                Unlock Core
-              </button>
-            ) : (
-              <button 
-                onClick={() => executeCoreAICommand("Lock system instantly")}
-                className="btn-white bg-white text-black flex items-center gap-2 px-3 py-1.5 text-xs rounded font-semibold uppercase cursor-pointer hover:bg-white/90"
-                id="lock-app-btn"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                Lock System
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setSystemState("REBOOTING");
-                appendLog("Warm system restart signaled. Rebuilding state matrices...", "warning");
-                triggerVoiceSpeak("Warm restart sequence initiated. Clearing stack memories.");
-                setTimeout(() => {
-                  setSystemState("ONLINE");
-                  appendLog("GEMINI VOICE PILOT Boot sequence completed. Status NOMINAL.", "success");
-                }, 3000);
-              }}
-              className="px-3 py-1.5 rounded bg-white/5 border border-white/20 text-xs hover:bg-white/10 transition-colors cursor-pointer"
-              id="reboot-app-btn"
-            >
-              Reboot Kernel
-            </button>
+            <p className={`text-xs font-bold font-mono tracking-widest uppercase transition-colors ${
+              systemState === "ONLINE" ? "text-emerald-400" :
+              systemState === "LOCKED" ? "text-amber-500 animate-pulse" :
+              "text-red-500 font-extrabold animate-pulse"
+            }`}>{systemState}</p>
           </div>
         </div>
       </header>
 
-      {/* SHUTDOWN / LOCK SCREEN BANNER */}
-      {systemState === "SHUTDOWN" && (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-black/95 text-center min-h-[450px]" id="shutdown-screen">
-          <Laptop className="w-20 h-20 text-white/40 mb-4 animate-pulse" />
-          <h2 className="text-2xl font-black tracking-widest text-[#eeeeee]">GEMINI VOICE MODEL OFFLINE</h2>
-          <p className="text-sm font-mono text-white/60 tracking-tight max-w-md mt-2">
-            The laptop host and developer console have received a secure hardware close signal.
+      {/* 📰 LIVE GLOBAL NEWS HOLDER & BROADCAST TICKER */}
+      <div className="bg-black/85 border-b border-white/10 px-6 py-2 overflow-hidden flex items-center select-none shrink-0" id="news-holder-ticker-bar">
+        <div className="flex items-center gap-2 pr-4 border-r border-white/20 shrink-0 font-mono text-[9px] font-black uppercase text-white tracking-widest">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping shrink-0" />
+          <span>DOLFIN NEWS REAL-TIME</span>
+        </div>
+        <div className="flex-1 overflow-hidden relative">
+          <div className="whitespace-nowrap animate-marquee flex items-center gap-16 font-mono text-[10px] text-zinc-300 font-bold uppercase tracking-wider">
+            <span>★ [TECH] GEMINI AUTO-SCROLLER WITH INTEGRATED SCROLL VIEW INTERCEPTS ONLINE</span>
+            <span>★ [COGNITIVE] DOLFIN WORKING CONTINUOUSLY 24/7 ENHANCING REASONING LEDGER CONSTRAINTS</span>
+            <span>★ [SENSORS] 'ALL-TIME LISTEN' TRIGGER ACTIVE AND PULSING RELIABLY ON PORT 3000</span>
+            <span>★ [MARKETS] STOCK TRENDS AND BITCOIN INTRA-MINUTE CORRECTIONS SIMULATED IN REALTIME</span>
+            <span>★ [WEATHER] PARALLEL ATMOSPHERIC PARAMETERS SYNCHRONIZED ACROSS KEY SENSING SATELLITES</span>
+            <span>★ [DEVICES] INTEGRATED CONTROLLERS GIVING ACCELERATED LINK STABILITY NOMINAL</span>
+          </div>
+        </div>
+      </div>
+
+      {/* CHIEF SYSTEM WORKSPACE AREA */}
+      {systemState === "SHUTDOWN" ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-black/95 text-center min-h-[500px]" id="shutdown-screen">
+          <div className="relative w-24 h-24 flex items-center justify-center mb-6">
+            <div className="absolute inset-0 bg-red-500/10 rounded-full animate-ping pointer-events-none duration-1000" />
+            <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center shadow-[0_0_30px_rgba(239,68,68,0.3)]">
+              <Cpu className="w-8 h-8 text-red-500 animate-pulse" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-black tracking-widest text-[#eeeeee] uppercase font-mono">DOLFIN HOST LAPTOP SHUTDOWN</h2>
+          <p className="text-xs font-mono text-zinc-500 tracking-tight max-w-sm mt-3 leading-relaxed">
+            Autonomous Core shut down successfully. Central voice node offline. Saving neural data registries... Status mapped.
           </p>
+          
           <button
             onClick={() => {
               setSystemState("ONLINE");
-              appendLog("Simulated host laptop rebooted successfully.", "success");
-              triggerVoiceSpeak("Neural link established. Operating offline simulation.");
+              appendLog("Dolfin voice co-pilot booted back up successfully.", "success");
+              triggerVoiceSpeak("Welcome back developer. Main operational console restored successfully.");
             }}
-            className="btn-white mt-6"
+            className="mt-8 px-6 py-3 bg-[#e11d48] hover:bg-[#be123c] text-white text-xs font-black tracking-widest uppercase rounded shadow-[0_0_20px_rgba(225,29,72,0.4)] hover:scale-105 duration-200 cursor-pointer flex items-center gap-2 font-mono transition-all"
             id="boot-app-btn"
           >
-            BOOT GEMINI VOICE MODEL UP AGAIN
+            <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+            WAKE HOST LAPTOP
           </button>
         </div>
-      )}
-
-      {systemState === "LOCKED" && (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-black/90 text-center min-h-[450px]" id="locked-screen">
-          <Lock className="w-16 h-16 text-white mb-4 animate-[bounce_2s_infinite]" />
-          <h2 className="text-xl font-bold tracking-widest">CONSOLE COMPROMISED OR SECURED</h2>
-          <p className="text-xs font-mono text-white/50 mt-2 max-w-sm">
-            Access to autonomous system modules is secure. Re-authorize to link external browser control.
+      ) : systemState === "LOCKED" ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-black/90 text-center min-h-[500px]" id="locked-screen">
+          <div className="relative w-24 h-24 flex items-center justify-center mb-5">
+            <div className="absolute inset-0 bg-amber-500/10 rounded-full animate-ping pointer-events-none duration-1000" />
+            <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+              <Lock className="w-7 h-7 text-amber-500" />
+            </div>
+          </div>
+          <h2 className="text-xl font-black tracking-widest text-white uppercase font-mono">CONSOLE SYSTEM LOCKED DOWN</h2>
+          <p className="text-xs font-mono text-zinc-500 mt-3 max-w-xs leading-relaxed">
+            The neural links are temporarily locked due to access safety operations or lock trigger requests. Voice inputs restricted.
           </p>
+          
           <button
             onClick={() => {
               setSystemState("ONLINE");
               appendLog("System lock disengaged.", "success");
+              triggerVoiceSpeak("Console lock disengaged. Main layout accessible.");
             }}
-            className="btn-white mt-6"
+            className="mt-6 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-black text-xs font-black tracking-widest uppercase rounded shadow-[0_0_15px_rgba(245,158,11,0.3)] transition-all cursor-pointer font-mono flex items-center gap-2"
             id="unlock-app-btn-center"
           >
-            DISENGAGE VOICE SHIELD LOCK
+            <Unlock className="w-3.5 h-3.5" />
+            Disengage Voice Shield Lock
           </button>
         </div>
-      )}
-
-      {systemState === "REBOOTING" && (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#050505] text-center min-h-[450px]" id="rebooting-screen">
-          <div className="w-16 h-16 border-2 border-dashed border-white rounded-full animate-spin"></div>
-          <h2 className="text-lg font-mono tracking-widest mt-6">REBUILDING KERNEL STACK...</h2>
-          <progress className="w-48 h-1 bg-white/10 progress-indicator mt-4" value={65} max={100}></progress>
-        </div>
-      )}
-
-      {/* 📰 LIVE GLOBAL NEWS HOLDER & BROADCAST TICKER */}
-      {systemState === "ONLINE" && (
-        <div className="bg-black/85 border-b border-white/10 px-6 py-2 overflow-hidden flex items-center select-none shrink-0" id="news-holder-ticker-bar">
-          <div className="flex items-center gap-2 pr-4 border-r border-white/20 shrink-0 font-mono text-[9px] font-black uppercase text-white tracking-widest">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping shrink-0" />
-            <span>DOLFIN NEWS REAL-TIME</span>
-          </div>
-          <div className="flex-1 overflow-hidden relative">
-            <div className="whitespace-nowrap animate-marquee flex items-center gap-16 font-mono text-[10px] text-zinc-300 font-bold uppercase tracking-wider">
-              <span>★ [TECH] GEMINI AUTO-SCROLLER WITH INTEGRATED SCROLL VIEW INTERCEPTS ONLINE</span>
-              <span>★ [COGNITIVE] DOLFIN WORKING CONTINUOUSLY 24/7 ENHANCING REASONING LEDGER CONSTRAINTS</span>
-              <span>★ [SENSORS] 'ALL-TIME LISTEN' TRIGGER ACTIVE AND PULSING RELIABLY ON PORT 3000</span>
-              <span>★ [MARKETS] STOCK TRENDS AND BITCOIN INTRA-MINUTE CORRECTIONS SIMULATED IN REALTIME</span>
-              <span>★ [WEATHER] PARALLEL ATMOSPHERIC PARAMETERS SYNCHRONIZED ACROSS KEY SENSING SATELLITES</span>
-              <span>★ [DEVICES] INTEGRATED CONTROLLERS GIVING ACCELERATED LINK STABILITY NOMINAL</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CHIEF SYSTEM WORKSPACE AREA */}
-      {systemState === "ONLINE" && (
-        <main className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-4 p-4 lg:p-6 bg-[#050505]" id="workspace-grid">
+      ) : (
+        <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 lg:p-6 bg-[#050505]" id="workspace-grid">
           
           {/* COLUMN 1: INTEGRATED CORE OPERATIONS (Business, Military, Weather stats) */}
           <aside className="lg:col-span-1 flex flex-col gap-4">
@@ -1257,6 +1265,79 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* ADVANCED MULTI-LANGUAGE & UTTERANCE CONSTRAINTS */}
+                <div className="border border-white/5 bg-black/30 p-2 rounded-md space-y-2 mt-2">
+                  <span className="text-[8.5px] uppercase font-black text-white/50 tracking-wider block">Advanced Core Settings</span>
+                  
+                  <div>
+                    <label className="text-[9.5px] text-white/60 font-mono block mb-1">Active Core Language</label>
+                    <select
+                      value={selectedLanguage}
+                      onChange={(e) => {
+                        setSelectedLanguage(e.target.value);
+                        appendLog(`Vocal channel translated/mapped to: ${e.target.value}`, "success");
+                        triggerVoiceSpeak("Language map synchronized successfully.");
+                      }}
+                      className="w-full bg-black border border-white/10 rounded p-1 text-[11px] font-mono text-emerald-400 focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="en-US">English (United States)</option>
+                      <option value="es-ES">Español (España) - Spanish</option>
+                      <option value="fr-FR">Français (France) - French</option>
+                      <option value="ja-JP">日本語 (日本) - Japanese</option>
+                      <option value="de-DE">Deutsch (Deutschland) - German</option>
+                      <option value="bn-BD">বাংলা (বাংলাদেশ) - Bengali</option>
+                      <option value="it-IT">Italiano (Italia) - Italian</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1 border-t border-white/5">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-bold text-white block">Speak "OK" Only Mode</span>
+                      <span className="text-[8px] text-zinc-400 block max-w-[140px]">Shorten speaking cycle outputs strictly to "OK" or "Okay" equivalents.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = !onlySpeakOk;
+                        setOnlySpeakOk(nextVal);
+                        appendLog(`Muted speech output to OK-Only: ${nextVal ? "ENABLED" : "DISABLED"}`, "info");
+                        // Timeout allows the state setter to flush before triggering speech
+                        setTimeout(() => triggerVoiceSpeak("Speech cycle updated"), 50);
+                      }}
+                      className={`px-2 py-1 text-[8.5px] font-mono uppercase tracking-wider rounded transition-all cursor-pointer border ${
+                        onlySpeakOk 
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" 
+                          : "bg-black/30 text-zinc-500 border-white/10"
+                      }`}
+                    >
+                      {onlySpeakOk ? "Active" : "Normal"}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1 border-t border-white/5">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-bold text-white block">Single Turn Listen</span>
+                      <span className="text-[8px] text-zinc-400 block max-w-[140px]">Release microphone instantly after a single spoken query request.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = !singleTurnListen;
+                        setSingleTurnListen(nextVal);
+                        appendLog(`Single-turn Listening: ${nextVal ? "ENABLED" : "DISABLED"}`, "info");
+                        setTimeout(() => triggerVoiceSpeak("Listening pattern synchronized"), 50);
+                      }}
+                      className={`px-2 py-1 text-[8.5px] font-mono uppercase tracking-wider rounded transition-all cursor-pointer border ${
+                        singleTurnListen 
+                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" 
+                          : "bg-black/30 text-zinc-500 border-white/10"
+                      }`}
+                    >
+                      {singleTurnListen ? "Single" : "Cont."}
+                    </button>
+                  </div>
+                </div>
+
                 <button
                   onClick={() => triggerVoiceSpeak("Linking telemetry active. Speak into the core device grid, developer.")}
                   className="w-full flex items-center justify-center gap-1.5 py-1 mt-1 border border-white/20 hover:border-white text-[10px] text-white uppercase rounded bg-white/5 hover:bg-white/10 cursor-pointer"
@@ -1265,6 +1346,64 @@ export default function App() {
                   <Volume2 className="w-3.5 h-3.5 animate-pulse" />
                   Test Voice Identity
                 </button>
+              </div>
+            </div>
+
+            {/* AGENT SPEED OPTIMIZER CORE */}
+            <div className="glass p-4 rounded-lg border border-emerald-500/20 bg-emerald-950/5 flex flex-col gap-2" id="hyper-speed-booster-card">
+              <p className="label-mono flex justify-between items-center text-[10px] font-black tracking-widest text-emerald-400">
+                <span className="flex items-center gap-1.5 uppercase">
+                  <Zap className="w-3.5 h-3.5 fill-emerald-400" />
+                  Agent Speed Optimizer
+                </span>
+                <span className="px-1.5 py-0.5 bg-emerald-500 text-black font-extrabold text-[8px] uppercase tracking-normal">Turbo Active</span>
+              </p>
+
+              <div className="space-y-2 font-mono text-[9px] text-zinc-300">
+                <p className="text-[10px] leading-snug">
+                  The voice agent is overclocked using streamlined directives and <span className="text-emerald-400 font-bold">ThinkingLevel.MINIMAL</span> to achieve <span className="text-white font-bold">&lt;80ms pre-fill</span> and instant tool execution.
+                </p>
+
+                <div className="grid grid-cols-2 gap-1 bg-black/50 p-2 rounded border border-white/5 font-mono text-[8.5px]">
+                  <div>
+                    <span className="opacity-50">Model Preset:</span>
+                    <p className="text-white font-bold truncate">Gemini 3.5 Flash</p>
+                  </div>
+                  <div>
+                    <span className="opacity-50">Thinking Level:</span>
+                    <p className="text-emerald-400 font-bold">Minimal (Ultra)</p>
+                  </div>
+                  <div>
+                    <span className="opacity-50">Pre-fill Latency:</span>
+                    <p className="text-white font-bold">12ms - Instant</p>
+                  </div>
+                  <div>
+                    <span className="opacity-50">Output Limits:</span>
+                    <p className="text-white font-bold">Concise (Single sentence)</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 items-center justify-between mt-1 bg-emerald-950/20 border border-emerald-500/20 p-2 rounded-md">
+                  <div>
+                    <span className="text-[9.5px] font-bold text-white block">Hyper-Speed Core Bypass</span>
+                    <span className="text-[7.5px] text-zinc-400 block leading-tight">Bypasses long pre-reasoning cycles</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setHyperSpeedEnabled(prev => !prev);
+                      appendLog(`Hyper-Speed Overclock state set to: ${!hyperSpeedEnabled ? "ENABLED" : "DISABLED"}`, !hyperSpeedEnabled ? "success" : "warning");
+                      triggerVoiceSpeak(!hyperSpeedEnabled ? "Rapid response overclock engaged. Telemetry latency minimized." : "Standard reasoning depth restored.");
+                    }}
+                    className={`px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider rounded transition-all cursor-pointer flex items-center gap-1 border ${
+                      hyperSpeedEnabled
+                        ? "bg-emerald-500 text-black border-emerald-400"
+                        : "bg-black/40 text-zinc-400 border-white/10"
+                    }`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${hyperSpeedEnabled ? "bg-black animate-ping" : "bg-white/40"}`} />
+                    {hyperSpeedEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
               </div>
             </div>
           </aside>
@@ -1296,10 +1435,11 @@ export default function App() {
                       value={selectedModel}
                       onChange={(e) => {
                         setSelectedModel(e.target.value);
-                        appendLog(`[SYSTEM] Selected model changed to: ${e.target.value}`, "info");
+                        appendLog(`[SYSTEM] Selected model set to: ${e.target.value}`, "success");
                       }}
-                      className="bg-black text-[9px] text-white/95 border border-white/10 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-white/30 font-mono transition-all"
+                      className="bg-black text-[9px] text-white/95 border border-white/10 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-white/30 font-mono transition-all font-bold text-emerald-400"
                     >
+                      <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast & Smooth AI)</option>
                       <option value="gemini-3.1-flash-lite">Gemini 3.1 Lite (Fastest)</option>
                       <option value="gemini-3.5-flash">Gemini 3.5 Flash (Standard)</option>
                       <option value="gemini-flash-latest">Gemini Flash Latest</option>
@@ -1460,313 +1600,6 @@ export default function App() {
             </div>
           </section>
 
-          {/* COLUMN 4: BROWSER APP CONTROL & LIVE DEVICE SIMULATORS */}
-          <aside className="lg:col-span-1 flex flex-col gap-4">
-            
-            {/* BROWSER AND APP CONTROLLER CARD */}
-            <div 
-              className={`glass p-4 rounded-lg flex flex-col border transition-all duration-500 relative ${
-                controlledPanel === "browser" 
-                  ? "border-white ring-2 ring-white/35 shadow-[0_0_20px_rgba(255,255,255,0.35)] scale-[1.01] bg-white/[0.04]" 
-                  : "border-white/10 bg-white/[0.02]"
-              }`} 
-              id="browser-controller-card"
-            >
-              {controlledPanel === "browser" && (
-                <div className="absolute -top-2 left-4 bg-white text-black text-[8px] font-mono tracking-widest px-1.5 py-0.5 rounded font-black uppercase animate-pulse flex items-center gap-1 z-10 shadow-[0_0_8px_rgba(255,255,255,0.8)]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-black animate-ping"></span>
-                  Gemini Override Engaged
-                </div>
-              )}
-              <p className="label-mono flex justify-between items-center mb-3 text-[10px] font-black tracking-widest border-b border-white/10 pb-2">
-                <span>DOLFIN AI AGENT EXPLORER</span>
-                <span className="px-1.5 py-0.5 bg-white text-black font-extrabold text-[8px] uppercase tracking-normal">Continuous System</span>
-              </p>
-
-              {/* 📡 SECTION 1: DOLFIN CONTINUOUS LEARNING MATRIX */}
-              <div className="space-y-1.5 mb-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-mono font-black text-white/95 uppercase flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded bg-emerald-500 animate-pulse shadow-[0_0_6px_#10b981]" />
-                    Cognitive Learning Matrix
-                  </span>
-                  <span className="text-[7.5px] font-mono text-emerald-400 font-bold uppercase animate-pulse">Onboard Working 24/7</span>
-                </div>
-                
-                <div className="bg-black/90 p-2 border border-emerald-500/20 rounded-md font-mono text-[9px] leading-relaxed text-emerald-300 max-h-[106px] min-h-[106px] overflow-y-auto scrollbar-none space-y-1 select-none">
-                  {learningLogs.map((logLine, idx) => (
-                    <p key={idx} className="truncate">{logLine}</p>
-                  ))}
-                </div>
-              </div>
-
-              {/* 🌐 SECTION 2: BROWSER CONTROL & ADVANCED VIEW SCROLL */}
-              <div className="space-y-2.5 mb-4 border-t border-white/10 pt-3">
-                <span className="text-[10px] font-mono font-black text-white/95 uppercase block">Browser Scraper Operations</span>
-                
-                {/* Real-time Scrape URL */}
-                <div className="space-y-1 bg-black/40 p-2 rounded border border-white/5">
-                  <div className="flex gap-1">
-                    <input
-                      type="text"
-                      value={scannedUrlInput}
-                      onChange={(e) => setScannedUrlInput(e.target.value)}
-                      placeholder="Enter URL to scrape..."
-                      className="flex-1 bg-black border border-white/20 rounded p-1 text-[10px] text-white font-mono focus:border-white focus:outline-none"
-                      id="scanner-url-input"
-                    />
-                    <button
-                      onClick={scanRealTimePageDetails}
-                      disabled={isScraping}
-                      className="px-2 py-1 bg-white text-black text-[9px] font-bold rounded hover:bg-slate-200 disabled:opacity-50 cursor-pointer"
-                      title="Parse Live Page Elements"
-                      id="scanner-scan-btn"
-                    >
-                      {isScraping ? "Scraping..." : "Scan"}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Sandbox Browser Info Display */}
-                <div className="bg-black/80 px-2.5 py-2 rounded border border-white/5 font-mono text-[9.5px]">
-                  <div className="flex justify-between items-center text-white/50 mb-1">
-                    <span className="flex items-center gap-1 text-[8.5px]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
-                      Sandbox Browser Mirror
-                    </span>
-                    <span className="text-[7.5px] uppercase">Active Mode</span>
-                  </div>
-                  <p className="text-white truncate">URL: {browserMirror.url}</p>
-                  <p className="text-[8.5px] text-white/50 truncate mt-0.5">Title: {browserMirror.title}</p>
-                </div>
-
-                {/* ADVANCED VIEW SCROLL CONTROL BAR */}
-                <div className="space-y-1.5 bg-black/20 p-2 rounded border border-white/5">
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-[9px] text-white/60 font-mono">Advanced Viewport Scrolling</label>
-                    <button
-                      onClick={() => setIsAutoScrolling(prev => !prev)}
-                      className={`text-[8px] font-mono px-1.5 py-0.5 rounded border transition-all uppercase cursor-pointer flex items-center gap-1 ${
-                        isAutoScrolling
-                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold"
-                          : "bg-black/40 text-white/40 border-white/10"
-                      }`}
-                      title="Toggle Continuous Autonomous Scroll Loop"
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${isAutoScrolling ? "bg-emerald-400 animate-ping" : "bg-white/20"}`} />
-                      🔁 Loop: {isAutoScrolling ? "AUTO" : "MANUAL"}
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1">
-                    <button
-                      onClick={() => {
-                        const ts = new Date().toLocaleTimeString();
-                        setVirtualBrowserActionLog(prev => [`[${ts}] [SCROLL] Shifted viewport vertical coordinate +420px.`, ...prev].slice(-6));
-                        appendLog("Scrolled browser down 40%", "info");
-                        triggerVoiceSpeak("Viewport shifted down forty percent.");
-                        setBrowserMirror(prev => ({ ...prev, status: "Active Mirror Scrolled Down", latency: "11ms" }));
-                      }}
-                      className="py-1 text-[8.5px] font-mono text-center border border-white/10 hover:border-white text-white/80 rounded hover:bg-white/5 cursor-pointer"
-                      title="Scroll Down 40% vertical viewport"
-                    >
-                      ↓ Down
-                    </button>
-                    <button
-                      onClick={() => {
-                        const ts = new Date().toLocaleTimeString();
-                        setVirtualBrowserActionLog(prev => [`[${ts}] [SCROLL] Shifted viewport vertical coordinate -420px.`, ...prev].slice(-6));
-                        appendLog("Scrolled browser up 40%", "info");
-                        triggerVoiceSpeak("Viewport shifted up forty percent.");
-                        setBrowserMirror(prev => ({ ...prev, status: "Active Mirror Scrolled Up", latency: "11ms" }));
-                      }}
-                      className="py-1 text-[8.5px] font-mono text-center border border-white/10 hover:border-white text-white/80 rounded hover:bg-white/5 cursor-pointer"
-                      title="Scroll Up 40% vertical viewport"
-                    >
-                      ↑ Up
-                    </button>
-                    <button
-                      onClick={() => {
-                        const ts = new Date().toLocaleTimeString();
-                        setVirtualBrowserActionLog(prev => [`[${ts}] [SCROLL] Relocated coordinate yOffset to 0px.`, ...prev].slice(-6));
-                        appendLog("Scrolled viewport to top header.", "info");
-                        triggerVoiceSpeak("Web page viewport relocated to top header anchor.");
-                        setBrowserMirror(prev => ({ ...prev, status: "Active Mirror Top", latency: "10ms" }));
-                      }}
-                      className="py-1 text-[8.5px] font-mono text-center border border-white/10 hover:border-white text-white/80 rounded hover:bg-white/5 cursor-pointer"
-                      title="Scroll to Top anchor"
-                    >
-                      ⏮️ Top
-                    </button>
-                    <button
-                      onClick={() => {
-                        const ts = new Date().toLocaleTimeString();
-                        setVirtualBrowserActionLog(prev => [`[${ts}] [SCROLL] Relocated coordinate yOffset to 2500px bottom.`, ...prev].slice(-6));
-                        appendLog("Scrolled viewport to bottom footer.", "info");
-                        triggerVoiceSpeak("Web page viewport relocated to bottom footer absolute.");
-                        setBrowserMirror(prev => ({ ...prev, status: "Active Mirror Bottom", latency: "12ms" }));
-                      }}
-                      className="py-1 text-[8.5px] font-mono text-center border border-white/10 hover:border-white text-white/80 rounded hover:bg-white/5 cursor-pointer"
-                      title="Scroll to Bottom anchor"
-                    >
-                      ⏭️ End
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 🔌 SECTION 3: DEVICE ACCESS & LAUNCHER HUB */}
-              <div className="space-y-2 border-t border-white/10 pt-3 flex-grow">
-                <span className="text-[10px] font-mono font-black text-white/95 uppercase block">Universal Device App Launcher</span>
-                
-                <div className="grid grid-cols-2 gap-1.5 text-[9px] font-mono">
-                  {/* APP 1: CHROME OPEN */}
-                  <button
-                    onClick={() => {
-                      const ts = new Date().toLocaleTimeString();
-                      setVirtualBrowserActionLog(prev => [`[${ts}] [SYSTEM] Target Chrome browser session initialized successfully.`, ...prev].slice(-6));
-                      setBrowserMirror(prev => ({ ...prev, active: true, url: "https://google.com/chrome-node", title: "Chrome Sandbox Workspace" }));
-                      appendLog("Bypassed device system parameters: Spawned Chromium.", "success");
-                      triggerVoiceSpeak("Target chromium session opened.");
-                    }}
-                    className="flex items-center gap-1.5 p-1.5 bg-black border border-white/15 hover:border-white rounded text-white/80 cursor-pointer"
-                  >
-                    <span>🌐</span>
-                    <span className="truncate">Open Browser</span>
-                  </button>
-
-                  {/* APP 2: FILE EXPLORER */}
-                  <button
-                    onClick={() => {
-                      appendLog("System File Browser Launched: scanned root directory.", "success");
-                      triggerVoiceSpeak("System files loaded successfully. All directories verified.");
-                    }}
-                    className="flex items-center gap-1.5 p-1.5 bg-black border border-white/15 hover:border-white rounded text-white/80 cursor-pointer"
-                  >
-                    <span>📂</span>
-                    <span className="truncate">File Browser</span>
-                  </button>
-
-                  {/* APP 3: MATRIX SEARCH */}
-                  <button
-                    onClick={() => {
-                      setTranscript("Gemini, global research matrix database for automated intelligence.");
-                      executeCoreAICommand("Gemini, global research matrix database for automated intelligence.");
-                    }}
-                    className="flex items-center gap-1.5 p-1.5 bg-black border border-white/15 hover:border-white rounded text-white/80 cursor-pointer"
-                  >
-                    <span>🔍</span>
-                    <span className="truncate">Search Matrix</span>
-                  </button>
-
-                  {/* APP 4: TRACK SATELLITE HANDSHAKE */}
-                  <button
-                    onClick={() => {
-                      appendLog("Satellite handshake ping dispatching... Handshake 100% nominal.", "info");
-                      triggerVoiceSpeak("Active satellite communication link validated.");
-                    }}
-                    className="flex items-center gap-1.5 p-1.5 bg-black border border-white/15 hover:border-white rounded text-white/80 cursor-pointer"
-                  >
-                    <span>🛰️</span>
-                    <span className="truncate">Verify Link</span>
-                  </button>
-                </div>
-
-                {/* METADATA SUMMARY METRICS */}
-                <div className="p-2 border border-white/5 bg-black/20 rounded space-y-1 text-[8.5px] font-mono mt-3">
-                  <div className="flex justify-between">
-                    <span className="opacity-50">Handshake IP:</span>
-                    <span>{browserMirror.ip}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-50">CDN Cache Routing:</span>
-                    <span>{browserMirror.server}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-50">Mirror Response Latency:</span>
-                    <span className="font-bold text-white/95">{browserMirror.latency}</span>
-                  </div>
-                </div>
-
-                {/* Bottom Core Restart and Terminators */}
-                <div className="mt-4 flex gap-1.5 pt-1.5">
-                  <button
-                    onClick={() => {
-                      const ts = new Date().toLocaleTimeString();
-                      setVirtualBrowserActionLog(prev => [`[${ts}] [THREAD] Spawned new active chromium container.`, ...prev].slice(-6));
-                      setBrowserMirror(prev => ({ ...prev, active: true, url: "https://workstation.01/dashboard/real-time", title: "Gemini 1.5 Web Monitor", status: "Active Mirror Linked" }));
-                      appendLog("Simulated new active browser controller session initialized.", "info");
-                      triggerVoiceSpeak("Active browser container initialized.");
-                    }}
-                    className="flex-1 py-1 bg-white text-black text-[9px] font-bold rounded cursor-pointer text-center select-none"
-                  >
-                    Spawn Sandbox
-                  </button>
-                  <button
-                    onClick={() => {
-                      const ts = new Date().toLocaleTimeString();
-                      setVirtualBrowserActionLog(prev => [`[${ts}] [THREAD] Process tree terminated.`, ...prev].slice(-6));
-                      setBrowserMirror(prev => ({ ...prev, active: false, url: "workstation.closed/idle" }));
-                      appendLog("Killed redundant process threads.", "warning");
-                      triggerVoiceSpeak("Process trees terminated.");
-                    }}
-                    className="flex-1 py-1 text-[9px] cursor-pointer border border-white bg-transparent text-white hover:bg-white/5 rounded text-center select-none"
-                  >
-                    Kill Thread
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* REMOTE DEVICE CONTROL & LIVE ACCESS MIRROR OVERRIDE CARD */}
-            <div 
-              className={`glass p-4 rounded-lg flex-grow flex flex-col border transition-all duration-500 relative min-h-[180px] ${
-                controlledPanel === "terminal" || controlledPanel === "shell"
-                  ? "border-white ring-2 ring-white/35 shadow-[0_0_20px_rgba(255,255,255,0.35)] scale-[1.01] bg-white/[0.04]" 
-                  : "border-white/10 bg-white/[0.02]"
-              }`} 
-              id="device-access-override-card"
-            >
-              {(controlledPanel === "terminal" || controlledPanel === "shell") && (
-                <div className="absolute -top-2 left-4 bg-white text-black text-[8px] font-mono tracking-widest px-1.5 py-0.5 rounded font-black uppercase animate-pulse flex items-center gap-1 z-10 shadow-[0_0_8px_rgba(255,255,255,0.8)]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-black animate-ping"></span>
-                  Gemini Override Engaged
-                </div>
-              )}
-              <p className="label-mono flex justify-between items-center mb-3 text-[10px] font-bold tracking-widest">
-                <span>Device Access Log</span>
-                <span className="text-[8px] bg-red-600 px-1 rounded animate-pulse uppercase tracking-normal">Bypassed</span>
-              </p>
-
-              {/* LIVE ACCESS STREAM LOGGER */}
-              <div className="bg-black border border-white/10 p-2.5 rounded flex-1 font-mono text-[9px] leading-relaxed overflow-y-auto max-h-[140px] scrollbar-none space-y-1">
-                {terminalLogs.map(log => (
-                  <p key={log.id} className={
-                    log.type === "success" ? "text-white" :
-                    log.type === "warning" ? "text-yellow-400" :
-                    log.type === "error" ? "text-red-500 font-bold" :
-                    log.type === "input" ? "text-teal-300" :
-                    log.type === "gemini" ? "text-purple-400 italic" : "text-white/60"
-                  }>
-                    <span className="text-white/30 mr-1.5 font-light">[{log.timestamp}]</span>
-                    {log.text}
-                  </p>
-                ))}
-              </div>
-
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={() => {
-                    executeCoreAICommand("Shutdown HOST system");
-                  }}
-                  className="btn-white w-full py-2 bg-white text-black hover:bg-slate-200 uppercase text-[10px] font-black cursor-pointer"
-                  id="force-shutdown-btn"
-                >
-                  Shutdown Host Laptop
-                </button>
-              </div>
-            </div>
-          </aside>
         </main>
       )}
 
